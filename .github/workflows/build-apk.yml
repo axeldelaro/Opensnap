@@ -25,13 +25,27 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Setup Java 17 (Eclipse Temurin)
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: 'temurin'
           java-version: '17'
 
-      - name: Setup Android SDK (API 35)
-        uses: android-actions/setup-android@v3
+      - name: Configure Android SDK 35 & Accept Licenses
+        run: |
+          SDK_ROOT="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-$HOME/android-sdk}}"
+          mkdir -p "$SDK_ROOT"
+          SDKMANAGER=$(find "$SDK_ROOT" -name sdkmanager -type f 2>/dev/null | head -n 1 || true)
+          if [ -z "$SDKMANAGER" ]; then
+            curl -fsSL https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip -o /tmp/cmdtools.zip
+            mkdir -p "$SDK_ROOT/cmdline-tools"
+            unzip -q /tmp/cmdtools.zip -d "$SDK_ROOT/cmdline-tools"
+            mv "$SDK_ROOT/cmdline-tools/cmdline-tools" "$SDK_ROOT/cmdline-tools/latest"
+            SDKMANAGER="$SDK_ROOT/cmdline-tools/latest/bin/sdkmanager"
+          fi
+          yes | "$SDKMANAGER" --sdk_root="$SDK_ROOT" --licenses > /dev/null || true
+          "$SDKMANAGER" --sdk_root="$SDK_ROOT" "platform-tools" "platforms;android-35" "build-tools;35.0.0" "build-tools;34.0.0" > /dev/null
+          echo "ANDROID_HOME=$SDK_ROOT" >> "$GITHUB_ENV"
+          echo "ANDROID_SDK_ROOT=$SDK_ROOT" >> "$GITHUB_ENV"
 
       - name: Setup Gradle Cache
         uses: gradle/actions/setup-gradle@v4
@@ -43,11 +57,16 @@ jobs:
           key: opensnap-release-keystore-v1
 
       - name: Prepare Release Keystore (V1 + V2 + V3 APK Signing)
+        env:
+          SECRET_KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          SECRET_KEYSTORE_PASS: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          SECRET_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          SECRET_KEY_PASS: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: |
           mkdir -p ~/.opensnap-signing
           KEYSTORE_FILE="$HOME/.opensnap-signing/opensnap-release.jks"
-          if [ -n "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" ]; then
-            echo "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" | base64 --decode > "$KEYSTORE_FILE"
+          if [ -n "$SECRET_KEYSTORE_B64" ]; then
+            echo "$SECRET_KEYSTORE_B64" | base64 --decode > "$KEYSTORE_FILE"
           elif [ ! -f "$KEYSTORE_FILE" ]; then
             keytool -genkeypair -v \
               -keystore "$KEYSTORE_FILE" \
@@ -60,13 +79,14 @@ jobs:
               -keypass opensnap2026 \
               -dname "CN=OpenSnap Sovereign Messenger, OU=Cybersecurity, O=OpenSnap, L=Paris, S=IDF, C=FR"
           fi
-          echo "KEYSTORE_PATH=$KEYSTORE_FILE" >> $GITHUB_ENV
-          echo "KEYSTORE_PASSWORD=${{ secrets.ANDROID_KEYSTORE_PASSWORD || 'opensnap2026' }}" >> $GITHUB_ENV
-          echo "KEY_ALIAS=${{ secrets.ANDROID_KEY_ALIAS || 'opensnap' }}" >> $GITHUB_ENV
-          echo "KEY_PASSWORD=${{ secrets.ANDROID_KEY_PASSWORD || 'opensnap2026' }}" >> $GITHUB_ENV
+          echo "KEYSTORE_PATH=$KEYSTORE_FILE" >> "$GITHUB_ENV"
+          echo "KEYSTORE_PASSWORD=${SECRET_KEYSTORE_PASS:-opensnap2026}" >> "$GITHUB_ENV"
+          echo "KEY_ALIAS=${SECRET_KEY_ALIAS:-opensnap}" >> "$GITHUB_ENV"
+          echo "KEY_PASSWORD=${SECRET_KEY_PASS:-opensnap2026}" >> "$GITHUB_ENV"
 
       - name: Run Cryptographic & Protocol Unit Tests
         run: |
+          sed -i 's/\r$//' ./gradlew
           chmod +x ./gradlew
           ./gradlew testDebugUnitTest --no-daemon --stacktrace
 
@@ -83,7 +103,7 @@ jobs:
             exit 1
           fi
           cp "$APK_SOURCE" ./OpenSnap-latest.apk
-          APKSIGNER_BIN=$(find "$ANDROID_HOME/build-tools" -name apksigner | sort -V | tail -n 1)
+          APKSIGNER_BIN=$(find "$ANDROID_HOME/build-tools" -name apksigner | sort -V | tail -n 1 || true)
           if [ -n "$APKSIGNER_BIN" ]; then
             "$APKSIGNER_BIN" verify --verbose ./OpenSnap-latest.apk
           fi
@@ -101,6 +121,7 @@ jobs:
           retention-days: 90
 
       - name: Publish Signed APK to GitHub Releases
+        if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v1.0.${{ github.run_number }}
