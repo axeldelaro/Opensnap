@@ -84,7 +84,7 @@ object CryptoEngine {
         displayName: String,
         passwordOrEmpty: String,
         mnemonic12Words: String? = null,
-        memoryKiB: Int = 32_768,
+        memoryKiB: Int = 16_384,
         iterations: Int = 3,
         parallelism: Int = 2
     ): SovereignIdentityBundle {

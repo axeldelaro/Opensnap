@@ -145,7 +145,7 @@ class OpenSnapDaemonService : Service() {
     private var currentTransportLabel: String = "Wi-Fi / Cellulaire"
 
     private lateinit var relayPool: NostrRelayPool
-    private lateinit var webRtcFastLane: WebRtcMeshEngine
+    private var webRtcFastLane: WebRtcMeshEngine? = null
     private var connectivityManager: ConnectivityManager? = null
     private var networkCallback: ConnectivityManager.NetworkCallback? = null
 
@@ -179,21 +179,23 @@ class OpenSnapDaemonService : Service() {
             }
         )
 
-        webRtcFastLane = WebRtcMeshEngine(
-            context = applicationContext,
-            onSignalReadyToSend = { peerHex, signalPayload ->
-                daemonScope.launch {
-                    sendInternalWebRtcSignal(peerHex, signalPayload)
-                }
-            },
-            onFastLaneEnvelopeReceived = { _, sealedJson ->
-                daemonScope.launch {
-                    withSurgicalPacketLocks {
-                        processDecryptedSealedEnvelope(sealedJson)
+        webRtcFastLane = runCatching {
+            WebRtcMeshEngine(
+                context = applicationContext,
+                onSignalReadyToSend = { peerHex, signalPayload ->
+                    daemonScope.launch {
+                        sendInternalWebRtcSignal(peerHex, signalPayload)
+                    }
+                },
+                onFastLaneEnvelopeReceived = { _, sealedJson ->
+                    daemonScope.launch {
+                        withSurgicalPacketLocks {
+                            processDecryptedSealedEnvelope(sealedJson)
+                        }
                     }
                 }
-            }
-        )
+            )
+        }.getOrNull()
 
         registerAdaptiveNetworkCallback()
         startContinuous24hPurgeAndRatchetLoop()
@@ -206,7 +208,7 @@ class OpenSnapDaemonService : Service() {
         when (intent?.action) {
             ACTION_PANIC_WIPE -> {
                 relayPool.stopAll()
-                webRtcFastLane.shutdownAll()
+                webRtcFastLane?.shutdownAll()
                 PanicWipeManager.executeEmergencyWipe(applicationContext, notifyDaemon = false)
                 stopForeground(STOP_FOREGROUND_REMOVE)
                 stopSelf()
@@ -264,7 +266,7 @@ class OpenSnapDaemonService : Service() {
     override fun onDestroy() {
         unregisterNetworkCallback()
         relayPool.stopAll()
-        webRtcFastLane.shutdownAll()
+        webRtcFastLane?.shutdownAll()
         daemonScope.cancel()
         super.onDestroy()
     }
@@ -599,7 +601,7 @@ class OpenSnapDaemonService : Service() {
         )
         dao.upsertFriend(updated)
         syncEncryptedFriendVault(identity)
-        webRtcFastLane.initiateFastLaneDataChannel(updated.ed25519PubHex)
+        runCatching { webRtcFastLane?.initiateFastLaneDataChannel(updated.ed25519PubHex) }
 
         NotificationHelper.showIncomingMessageNotification(
             context = applicationContext,
@@ -848,9 +850,9 @@ class OpenSnapDaemonService : Service() {
             CryptoEngine.canonicalJson.decodeFromString<PresencePayload>(packet.bodyJson)
         }.getOrNull() ?: return
 
-        val isDirect = webRtcFastLane.activeFastLanePeers.value.contains(friend.ed25519PubHex)
+        val isDirect = webRtcFastLane?.activeFastLanePeers?.value?.contains(friend.ed25519PubHex) == true
         if (!isDirect && payload.state != PresenceKind.IDLE) {
-            webRtcFastLane.initiateFastLaneDataChannel(friend.ed25519PubHex)
+            runCatching { webRtcFastLane?.initiateFastLaneDataChannel(friend.ed25519PubHex) }
         }
 
         val bundle = Bundle().apply {
@@ -867,7 +869,7 @@ class OpenSnapDaemonService : Service() {
         }.getOrNull() ?: return
 
         if (signal.signalType.startsWith("FASTLANE_")) {
-            webRtcFastLane.handleIncomingSignal(friend.ed25519PubHex, friend.displayName, signal)
+            runCatching { webRtcFastLane?.handleIncomingSignal(friend.ed25519PubHex, friend.displayName, signal) }
             broadcastStatusToUi()
             return
         }
@@ -986,7 +988,9 @@ class OpenSnapDaemonService : Service() {
         )
 
         // Path A: Instant <30ms P2P WebRTC DataChannel Fast-Lane when open
-        val sentViaP2p = webRtcFastLane.sendViaFastLaneIfOpen(peerEd25519PubHex, sealedInnerJson)
+        val sentViaP2p = runCatching {
+            webRtcFastLane?.sendViaFastLaneIfOpen(peerEd25519PubHex, sealedInnerJson) == true
+        }.getOrDefault(false)
 
         // Path B: Store-and-Forward 24h Nostr NIP-59 Gift Wrap across WSS Relay Pool
         // (For pure typing indicators when P2P is already open, skip relay broadcast to save bandwidth)
@@ -1156,7 +1160,7 @@ class OpenSnapDaemonService : Service() {
     }
 
     private fun broadcastStatusToUi() {
-        val fastPeersCsv = webRtcFastLane.activeFastLanePeers.value.joinToString(",")
+        val fastPeersCsv = webRtcFastLane?.activeFastLanePeers?.value?.joinToString(",").orEmpty()
         val bundle = Bundle().apply {
             putInt(DaemonIpcContract.KEY_CONNECTED_RELAYS, connectedRelayCount)
             putInt(DaemonIpcContract.KEY_TOTAL_RELAYS, totalRelayCount)

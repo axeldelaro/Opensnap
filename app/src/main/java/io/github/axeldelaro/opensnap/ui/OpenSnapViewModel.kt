@@ -290,7 +290,7 @@ class OpenSnapViewModel(application: Application) : AndroidViewModel(application
                 } else {
                     postBanner("Compte souverain actif : ${derived.openSnapTag}")
                 }
-            } catch (e: Exception) {
+            } catch (e: Throwable) {
                 postBanner(e.message ?: "Erreur lors de la dérivation Argon2id")
             } finally {
                 _authBusy.value = false
@@ -324,20 +324,24 @@ class OpenSnapViewModel(application: Application) : AndroidViewModel(application
 
     private fun completeUnlockInitialization() {
         viewModelScope.launch {
-            val loaded = withContext(Dispatchers.IO) {
-                val id = HardwareKeystoreManager.loadIdentitySession(appContext)
-                TtlPurgeEngine.purgeExpiredContent(appContext)
-                id
+            try {
+                val loaded = withContext(Dispatchers.IO) {
+                    val id = HardwareKeystoreManager.loadIdentitySession(appContext)
+                    runCatching { TtlPurgeEngine.purgeExpiredContent(appContext) }
+                    id
+                }
+                if (loaded == null) {
+                    _appStage.value = AppStage.AUTH_SETUP
+                    return@launch
+                }
+                _identity.value = loaded
+                _integrityReport.value = ApkIntegrityGuard.inspect(appContext)
+                runCatching { TtlCleanupWorker.schedule(appContext) }
+                daemonClient.startAndBindDaemon()
+                daemonClient.notifyIdentityReloaded()
+            } catch (t: Throwable) {
+                postBanner("Erreur d'initialisation : ${t.message}")
             }
-            if (loaded == null) {
-                _appStage.value = AppStage.AUTH_SETUP
-                return@launch
-            }
-            _identity.value = loaded
-            _integrityReport.value = ApkIntegrityGuard.inspect(appContext)
-            TtlCleanupWorker.schedule(appContext)
-            daemonClient.startAndBindDaemon()
-            daemonClient.notifyIdentityReloaded()
         }
     }
 

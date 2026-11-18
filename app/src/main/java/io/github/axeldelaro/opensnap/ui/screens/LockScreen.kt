@@ -86,7 +86,7 @@ fun LockScreen(
                     BiometricManager.Authenticators.BIOMETRIC_WEAK
             )
             .build()
-        prompt.authenticate(info)
+        runCatching { prompt.authenticate(info) }
     }
 
     LaunchedEffect(canUseBiometric) {

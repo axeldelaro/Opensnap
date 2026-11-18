@@ -141,7 +141,7 @@ private fun OpenSnapRootApp(
             if (ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) !=
                 PackageManager.PERMISSION_GRANTED
             ) {
-                notifPermLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+                runCatching { notifPermLauncher.launch(Manifest.permission.POST_NOTIFICATIONS) }
             }
         }
     }
