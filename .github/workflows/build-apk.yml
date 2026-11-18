@@ -1,0 +1,125 @@
+name: Build & Release OpenSnap Signed APK
+
+on:
+  push:
+    branches:
+      - main
+      - master
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: "opensnap-apk-${{ github.ref }}"
+  cancel-in-progress: true
+
+jobs:
+  build-apk:
+    name: Compile, Sign & Release OpenSnap-latest.apk
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Java 17 (Eclipse Temurin)
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Setup Android SDK (API 35)
+        uses: android-actions/setup-android@v3
+
+      - name: Setup Gradle Cache
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Restore or Persist Deterministic Release Keystore
+        uses: actions/cache@v4
+        with:
+          path: ~/.opensnap-signing
+          key: opensnap-release-keystore-v1
+
+      - name: Prepare Release Keystore (V1 + V2 + V3 APK Signing)
+        run: |
+          mkdir -p ~/.opensnap-signing
+          KEYSTORE_FILE="$HOME/.opensnap-signing/opensnap-release.jks"
+          if [ -n "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" ]; then
+            echo "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" | base64 --decode > "$KEYSTORE_FILE"
+          elif [ ! -f "$KEYSTORE_FILE" ]; then
+            keytool -genkeypair -v \
+              -keystore "$KEYSTORE_FILE" \
+              -storetype PKCS12 \
+              -keyalg RSA \
+              -keysize 4096 \
+              -validity 10000 \
+              -alias opensnap \
+              -storepass opensnap2026 \
+              -keypass opensnap2026 \
+              -dname "CN=OpenSnap Sovereign Messenger, OU=Cybersecurity, O=OpenSnap, L=Paris, S=IDF, C=FR"
+          fi
+          echo "KEYSTORE_PATH=$KEYSTORE_FILE" >> $GITHUB_ENV
+          echo "KEYSTORE_PASSWORD=${{ secrets.ANDROID_KEYSTORE_PASSWORD || 'opensnap2026' }}" >> $GITHUB_ENV
+          echo "KEY_ALIAS=${{ secrets.ANDROID_KEY_ALIAS || 'opensnap' }}" >> $GITHUB_ENV
+          echo "KEY_PASSWORD=${{ secrets.ANDROID_KEY_PASSWORD || 'opensnap2026' }}" >> $GITHUB_ENV
+
+      - name: Run Cryptographic & Protocol Unit Tests
+        run: |
+          chmod +x ./gradlew
+          ./gradlew testDebugUnitTest --no-daemon --stacktrace
+
+      - name: Compile & Sign Release APK
+        run: |
+          chmod +x ./gradlew
+          ./gradlew assembleRelease --no-daemon --stacktrace
+
+      - name: Verify APK Signature & Export OpenSnap-latest.apk
+        run: |
+          APK_SOURCE="app/build/outputs/apk/release/app-release.apk"
+          if [ ! -f "$APK_SOURCE" ]; then
+            echo "Error: Signed release APK was not produced at $APK_SOURCE"
+            exit 1
+          fi
+          cp "$APK_SOURCE" ./OpenSnap-latest.apk
+          APKSIGNER_BIN=$(find "$ANDROID_HOME/build-tools" -name apksigner | sort -V | tail -n 1)
+          if [ -n "$APKSIGNER_BIN" ]; then
+            "$APKSIGNER_BIN" verify --verbose ./OpenSnap-latest.apk
+          fi
+          sha256sum ./OpenSnap-latest.apk > ./OpenSnap-latest.apk.sha256
+          ls -lh ./OpenSnap-latest.apk ./OpenSnap-latest.apk.sha256
+
+      - name: Upload OpenSnap-latest.apk to Workflow Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: OpenSnap-latest-apk
+          path: |
+            ./OpenSnap-latest.apk
+            ./OpenSnap-latest.apk.sha256
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: Publish Signed APK to GitHub Releases
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v1.0.${{ github.run_number }}
+          name: "OpenSnap v1.0.${{ github.run_number }} — Native E2EE Ephemeral Messenger"
+          body: |
+            ## 👻🛡️ OpenSnap `v1.0.${{ github.run_number }}` (Signed Native Android APK)
+
+            Téléchargez et installez **`OpenSnap-latest.apk`** directement sur votre appareil Android (Android 8.0 à Android 15+, API 26–35).
+
+            ### Architecture & Sécurité incluses
+            - **Daemon Réseau Dédié (`:network_daemon`)** : `ForegroundService` (`remoteMessaging|specialUse`, `START_STICKY`) maintenant un pool WebSocket chiffré (WSS) multiplexé + WebRTC DataChannel P2P avec notifications instantanées (< 300 ms) même application fermée ou écran éteint.
+            - **Chiffrement Souverain de Bout en Bout (E2EE)** : Dérivation déterministe **Argon2id** + phrase **BIP-39 (12 mots)** → **Ed25519** (signature) + **X25519** (ratchet Forward Secrecy par message) + **XChaCha20-Poly1305** + masquage d'expéditeur **NIP-59 Gift Wrap**.
+            - **Rétention Stricte 24h00 & Purge Cryptographique** : Base locale chiffrée **SQLCipher AES-256**, relais Store-and-Forward 24h (**NIP-40**) et effacement cryptographique irréversible des messages, vocaux et snaps après 24h00 (ou immédiatement en mode *Vue unique*).
+            - **Bouclier Physique & Anti-DDoS** : `FLAG_SECURE`, nettoyage EXIF/GPS intégral, déverrouillage biométrique StrongBox/TEE, liste blanche cryptographique stricte + Proof-of-Work anti-spam, et **Code PIN Leurre (Panic Wipe)**.
+          files: |
+            ./OpenSnap-latest.apk
+            ./OpenSnap-latest.apk.sha256
+          draft: false
+          prerelease: false
+          make_latest: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">OpenSnap</string>
+    <string name="daemon_channel_name">Tunnel Temps Réel E2EE</string>
+    <string name="messages_channel_name">Messages &amp; Snaps 24h</string>
+    <string name="voice_channel_name">Messages Vocaux Chiffrés</string>
+    <string name="friends_channel_name">Demandes d\'Amis</string>
+    <string name="calls_channel_name">Appels P2P Chiffrés</string>
+</resources>

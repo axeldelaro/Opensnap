@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "updatedAt": "2026-11-18T06:00:00Z",
+  "repository": "https://github.com/axeldelaro/Opensnap",
+  "ttlSeconds": 86400,
+  "powDifficultyBits": 8,
+  "relays": [
+    "wss://relay.damus.io",
+    "wss://nos.lol",
+    "wss://relay.primal.net",
+    "wss://nostr.mom",
+    "wss://offchain.pub"
+  ],
+  "stunServers": [
+    "stun:stun.l.google.com:19302",
+    "stun:stun1.l.google.com:19302",
+    "stun:stun.cloudflare.com:3478"
+  ],
+  "configPublicKeyEd25519Hex": "6d4a6c5a12222e59a35c9f6369a2adf5232eea4c4e970608d3de7d9975d74220",
+  "signatureEd25519Hex": "9c2a62955bf2705f61ce644849269625a34339b7c8e2b9f29bd59fb17ddb9def826b646a74df9a46b575d6a70421300cfacd359bbd291367bc526c69ca95680e"
+}

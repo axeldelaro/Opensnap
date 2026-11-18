@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Outer Cyber Shield -->
+    <path
+        android:fillColor="#FFEB3B"
+        android:pathData="M54,22L28,33v19c0,16.8 11.1,32.4 26,36.5C68.9,84.4 80,68.8 80,52V33L54,22zM73,52c0,12.7 -8.1,24.6 -19,28.8C43.1,76.6 35,64.7 35,52V37.6l19,-8l19,8V52z" />
+    <!-- Inner Ephemeral Lightning / Lock Core -->
+    <path
+        android:fillColor="#00E5FF"
+        android:pathData="M57,37L43,55h10l-3,16l15,-19H55L57,37z" />
+</vector>
